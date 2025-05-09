@@ -1,0 +1,145 @@
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+
+-- ประกาศโค้ด KeySystem และ UI ส่วนอื่น ๆ ตามเดิม
+local Window = Rayfield:CreateWindow({
+    Name = "PungShop",
+    Icon = 0,
+    LoadingTitle = "ยินดีต้อนรับ Kunghub",
+    LoadingSubtitle = "by Kunghe",
+    Theme = "Light",
+    DisableRayfieldPrompts = false,
+    DisableBuildWarnings = false,
+    ConfigurationSaving = {
+        Enabled = true,
+        FolderName = nil,
+        FileName = "Big Hub"
+    },
+    Discord = {
+        Enabled = true,
+        Invite = "https://discord.gg/QYpTxD7a",
+        RememberJoins = true
+    },
+    KeySystem = true,
+    KeySettings = {
+        Title = "ซื้อเองby.PungKung",
+        Subtitle = "หาเอาซื้อเอง System",
+        Note = "ค่ายนี้ของแทร่",
+        FileName = "Key",
+        SaveKey = false,
+        GrabKeyFromSite = false,
+        Key = {"ZG", "GG", "Pung"},
+    }
+})
+
+local PlayerTab = Window:CreateTab("Fly", 4483362458)
+
+local flyToggleEnabled = false
+local isFlying = false
+local flightConnection
+
+local function startFlying(character)
+    local humanoid = character:WaitForChild("Humanoid")
+
+    if not character.PrimaryPart then
+        local root = character:FindFirstChild("HumanoidRootPart")
+        if root then character.PrimaryPart = root end
+    end
+
+    if not character.PrimaryPart then return end
+
+    local originPosition = character.PrimaryPart.Position
+    local reachedHeight = false
+    local angle = 0
+
+    isFlying = true
+    humanoid.PlatformStand = true
+
+    flightConnection = task.spawn(function()
+        while isFlying and humanoid.Health > 0 do
+            if not character.PrimaryPart then break end
+
+            local currentY = character.PrimaryPart.Position.Y
+            local targetY = originPosition.Y + 50
+
+            if not reachedHeight then
+                if currentY >= targetY - 0.1 then
+                    reachedHeight = true
+                else
+                    character:SetPrimaryPartCFrame(character.PrimaryPart.CFrame + Vector3.new(0, 7, 0))
+                end
+            else
+                angle += math.rad(40)
+                local radius = 30
+                local offsetX = math.cos(angle) * radius
+                local offsetZ = math.sin(angle) * radius
+                local circlePos = originPosition + Vector3.new(offsetX, 30, offsetZ)
+
+                character:SetPrimaryPartCFrame(CFrame.new(circlePos))
+            end
+
+            task.wait(0.01)
+        end
+    end)
+end
+
+local function stopFlying(character)
+    isFlying = false
+    if character then
+        local humanoid = character:FindFirstChild("Humanoid")
+        if humanoid then
+            humanoid.PlatformStand = false
+        end
+    end
+    if flightConnection then
+        flightConnection:Disconnect()
+        flightConnection = nil
+    end
+end
+
+local Toggle = PlayerTab:CreateToggle({
+    Name = "❌กันตาย",
+    CurrentValue = false,
+    Flag = "fly",
+    Callback = function(Value)
+        flyToggleEnabled = Value
+        local player = game.Players.LocalPlayer
+        local character = player.Character or player.CharacterAdded:Wait()
+
+        local humanoid = character:FindFirstChild("Humanoid")
+        if humanoid and humanoid.Health <= 30 then
+            if not Value then
+                stopFlying(character)
+            else
+                startFlying(character)
+            end
+        else
+            print("Cannot activate fly. Health is greater than 30.")
+        end
+    end
+})
+
+local function setupHealthCheck(player)
+    local function connectHealth(humanoid, character)
+        humanoid:GetPropertyChangedSignal("Health"):Connect(function()
+            if humanoid.Health <= 30 and flyToggleEnabled and not isFlying then
+                startFlying(character)
+            elseif humanoid.Health > 30 and isFlying then
+                stopFlying(character)
+            end
+        end)
+    end
+
+    if player.Character then
+        local humanoid = player.Character:FindFirstChild("Humanoid")
+        if humanoid then
+            connectHealth(humanoid, player.Character)
+        end
+    end
+
+    player.CharacterAdded:Connect(function(char)
+        local hum = char:WaitForChild("Humanoid")
+        connectHealth(hum, char)
+    end)
+end
+
+setupHealthCheck(game.Players.LocalPlayer)
