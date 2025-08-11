@@ -1,145 +1,132 @@
-local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
 
--- ประกาศโค้ด KeySystem และ UI ส่วนอื่น ๆ ตามเดิม
-local Window = Rayfield:CreateWindow({
-    Name = "PungShop",
-    Icon = 0,
-    LoadingTitle = "ยินดีต้อนรับ Kunghub",
-    LoadingSubtitle = "by Kunghe",
-    Theme = "Light",
-    DisableRayfieldPrompts = false,
-    DisableBuildWarnings = false,
-    ConfigurationSaving = {
-        Enabled = true,
-        FolderName = nil,
-        FileName = "Big Hub"
-    },
-    Discord = {
-        Enabled = true,
-        Invite = "https://discord.gg/QYpTxD7a",
-        RememberJoins = true
-    },
-    KeySystem = true,
-    KeySettings = {
-        Title = "ซื้อเองby.PungKung",
-        Subtitle = "หาเอาซื้อเอง System",
-        Note = "ค่ายนี้ของแทร่",
-        FileName = "Key",
-        SaveKey = false,
-        GrabKeyFromSite = false,
-        Key = {"ZG", "GG", "Pung"},
-    }
-})
+local pulling = false
+local pulled = nil
+local dragOffset = Vector3.new(0, 0, -2)
 
-local PlayerTab = Window:CreateTab("Fly", 4483362458)
+-- หาเป้าหมายที่ใกล้ที่สุด (เฉพาะที่อยู่สูงหรือต่ำกว่าเรา)
+local function getClosestPlayer()
+    local closest = nil
+    local shortestDistance = math.huge
+    local character = LocalPlayer.Character
+    local myRoot = character and character:FindFirstChild("HumanoidRootPart")
+    if not myRoot then return nil end
 
-local flyToggleEnabled = false
-local isFlying = false
-local flightConnection
-
-local function startFlying(character)
-    local humanoid = character:WaitForChild("Humanoid")
-
-    if not character.PrimaryPart then
-        local root = character:FindFirstChild("HumanoidRootPart")
-        if root then character.PrimaryPart = root end
-    end
-
-    if not character.PrimaryPart then return end
-
-    local originPosition = character.PrimaryPart.Position
-    local reachedHeight = false
-    local angle = 0
-
-    isFlying = true
-    humanoid.PlatformStand = true
-
-    flightConnection = task.spawn(function()
-        while isFlying and humanoid.Health > 0 do
-            if not character.PrimaryPart then break end
-
-            local currentY = character.PrimaryPart.Position.Y
-            local targetY = originPosition.Y + 50
-
-            if not reachedHeight then
-                if currentY >= targetY - 0.1 then
-                    reachedHeight = true
-                else
-                    character:SetPrimaryPartCFrame(character.PrimaryPart.CFrame + Vector3.new(0, 7, 0))
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+            local targetRoot = player.Character.HumanoidRootPart
+            local verticalDiff = math.abs(targetRoot.Position.Y - myRoot.Position.Y)
+            if verticalDiff > 5 then -- ต้องสูงหรือต่ำกว่าเราอย่างน้อย 5 studs
+                local dist = (targetRoot.Position - myRoot.Position).Magnitude
+                if dist < shortestDistance then
+                    closest = player
+                    shortestDistance = dist
                 end
-            else
-                angle += math.rad(40)
-                local radius = 30
-                local offsetX = math.cos(angle) * radius
-                local offsetZ = math.sin(angle) * radius
-                local circlePos = originPosition + Vector3.new(offsetX, 30, offsetZ)
-
-                character:SetPrimaryPartCFrame(CFrame.new(circlePos))
             end
-
-            task.wait(0.01)
         end
-    end)
+    end
+    return closest
 end
 
-local function stopFlying(character)
-    isFlying = false
-    if character then
-        local humanoid = character:FindFirstChild("Humanoid")
-        if humanoid then
-            humanoid.PlatformStand = false
-        end
-    end
-    if flightConnection then
-        flightConnection:Disconnect()
-        flightConnection = nil
-    end
+-- GUI ถาวร
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "PullGui"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+
+local PullButton = Instance.new("TextButton")
+PullButton.Size = UDim2.new(0, 60, 0, 60)
+PullButton.Position = UDim2.new(0.8, 0, 0.7, 0)
+PullButton.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+PullButton.TextColor3 = Color3.new(1, 1, 1)
+PullButton.TextScaled = true
+PullButton.Text = "⚡"
+PullButton.AutoButtonColor = true
+PullButton.Parent = ScreenGui
+
+local UIScale = Instance.new("UIStroke", PullButton)
+UIScale.Thickness = 2
+UIScale.Color = Color3.fromRGB(50, 50, 50)
+UIScale.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+
+local UICorner = Instance.new("UICorner", PullButton)
+UICorner.CornerRadius = UDim.new(1, 0)
+
+-- ลากปุ่มได้
+local dragging = false
+local dragInput, dragStart, startPos
+
+local function update(input)
+    local delta = input.Position - dragStart
+    PullButton.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
 end
 
-local Toggle = PlayerTab:CreateToggle({
-    Name = "❌กันตาย",
-    CurrentValue = false,
-    Flag = "fly",
-    Callback = function(Value)
-        flyToggleEnabled = Value
-        local player = game.Players.LocalPlayer
-        local character = player.Character or player.CharacterAdded:Wait()
-
-        local humanoid = character:FindFirstChild("Humanoid")
-        if humanoid and humanoid.Health <= 30 then
-            if not Value then
-                stopFlying(character)
-            else
-                startFlying(character)
-            end
-        else
-            print("Cannot activate fly. Health is greater than 30.")
-        end
-    end
-})
-
-local function setupHealthCheck(player)
-    local function connectHealth(humanoid, character)
-        humanoid:GetPropertyChangedSignal("Health"):Connect(function()
-            if humanoid.Health <= 30 and flyToggleEnabled and not isFlying then
-                startFlying(character)
-            elseif humanoid.Health > 30 and isFlying then
-                stopFlying(character)
+PullButton.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = PullButton.Position
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
             end
         end)
     end
+end)
 
-    if player.Character then
-        local humanoid = player.Character:FindFirstChild("Humanoid")
-        if humanoid then
-            connectHealth(humanoid, player.Character)
+PullButton.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+        dragInput = input
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if input == dragInput and dragging then
+        update(input)
+    end
+end)
+
+-- เปิด/ปิดกระชาก
+PullButton.MouseButton1Click:Connect(function()
+    pulling = not pulling
+    if pulling then
+        pulled = getClosestPlayer()
+        if pulled then
+            PullButton.Text = "⛔"
+        else
+            pulling = false
+            PullButton.Text = "⚡"
+        end
+    else
+        if pulled and pulled.Character and pulled.Character:FindFirstChild("HumanoidRootPart") then
+            pulled.Character.HumanoidRootPart.Anchored = false
+        end
+        pulled = nil
+        PullButton.Text = "⚡"
+    end
+end)
+
+-- ลากเป้าหมาย
+UserInputService.TouchMoved:Connect(function(touch, gp)
+    if pulling and pulled and pulled.Character and pulled.Character:FindFirstChild("HumanoidRootPart") then
+        local mousePos = UserInputService:GetMouseLocation()
+        local ray = workspace.CurrentCamera:ScreenPointToRay(mousePos.X, mousePos.Y)
+        local targetPos = ray.Origin + ray.Direction * 10
+        dragOffset = targetPos - LocalPlayer.Character.HumanoidRootPart.Position
+    end
+end)
+
+RunService.Heartbeat:Connect(function()
+    if pulling and pulled and pulled.Character and pulled.Character:FindFirstChild("HumanoidRootPart") then
+        local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if myRoot then
+            local targetRoot = pulled.Character.HumanoidRootPart
+            targetRoot.Anchored = true
+            targetRoot.CFrame = CFrame.new(myRoot.Position + dragOffset)
+            targetRoot.AssemblyLinearVelocity = Vector3.new(0, 250, 0)
         end
     end
-
-    player.CharacterAdded:Connect(function(char)
-        local hum = char:WaitForChild("Humanoid")
-        connectHealth(hum, char)
-    end)
-end
-
-setupHealthCheck(game.Players.LocalPlayer)
+end)
