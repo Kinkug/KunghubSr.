@@ -1,0 +1,1160 @@
+-- Services
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local Debris = game:GetService("Debris")
+local HttpService = game:GetService("HttpService")
+local Workspace = game:GetService("Workspace")
+
+-- Local Player and Character
+local LocalPlayer = Players.LocalPlayer
+local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+local Humanoid = Character:WaitForChild("Humanoid")
+local HumanoidRootPart = Character:WaitForChild("HumanoidRootPart")
+local Camera = Workspace.CurrentCamera
+local Mouse = LocalPlayer:GetMouse()
+
+-- UI Library
+local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
+
+-- Window Setup
+local Window = WindUI:CreateWindow({
+    Title = "MOKUN NEXUS 🔫 | a2.8",
+    Icon = "menu",
+    Author = "https://discord.gg/xWW3jhKM",
+    Folder = "MOKUN NEXUS",
+    Size = UDim2.fromOffset(400, 200),
+    Theme = "Dark",
+    Transparent = true,
+    Resizable = true
+})
+
+-- Open Button
+local button = Window:EditOpenButton({
+    Title = "Open Menu",
+    Icon = "apple",
+    CornerRadius = UDim.new(0, 50),
+    StrokeThickness = 2,
+    Color = ColorSequence.new(Color3.fromHSV(0, 1, 1), Color3.fromHSV(0.1, 1, 1)),
+    OnlyMobile = false,
+    Enabled = true,
+    Draggable = false
+})
+
+-- Silent Aim Variables
+local SilentAimEnabled = false
+local FOVRadius = 120
+local CurrentTarget = nil
+local SilentFOVCircle = Drawing.new("Circle")
+SilentFOVCircle.Color = Color3.fromRGB(255, 255, 0)
+SilentFOVCircle.Thickness = 1
+SilentFOVCircle.NumSides = 64
+SilentFOVCircle.Filled = false
+SilentFOVCircle.Transparency = 1
+SilentFOVCircle.Radius = FOVRadius
+SilentFOVCircle.Visible = false
+local Tracer = Drawing.new("Line")
+Tracer.Thickness = 1
+Tracer.Color = Color3.fromRGB(0, 255, 255)
+Tracer.Transparency = 1
+Tracer.Visible = false
+
+-- ESP Variables
+local espPlayers = {}
+local boxESPEnabled = false
+local nameESPEnabled = false
+local distanceESPEnabled = false
+local healthESPEnabled = false
+local highlightEnabled = false
+local highlights = {}
+
+-- Character Variables
+local walkSpeedEnabled = false
+local speedValue = 0.07
+local FlyEnabled = false
+local flying = false
+local floatPower = 40
+local fastFinishEnabled = false
+local teleportActive = false
+local featureEnabled = false
+local lockedY = nil
+local maxHeight = 10
+local startY = nil
+local hookEnabled = false
+
+-- Remote
+local Remote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("Send")
+
+-- Utility Functions
+local function getPing()
+    local stats = LocalPlayer:FindFirstChild("PlayerGui") and LocalPlayer.PlayerGui:FindFirstChild("NetworkStats")
+    if stats then
+        local pingText = stats:FindFirstChild("PingLabel")
+        if pingText then
+            local ping = tonumber(pingText.Text:match("%d+"))
+            return ping and ping / 1000 or 0.2
+        end
+    end
+    return 0.2
+end
+
+local function getClosestTarget()
+    local closest = nil
+    local shortestDistance = math.huge
+    local center = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("Head") then
+            local head = player.Character.Head
+            local pos, onScreen = Camera:WorldToViewportPoint(head.Position)
+            if onScreen then
+                local screenPos = Vector2.new(pos.X, pos.Y)
+                local distFromCenter = (screenPos - center).Magnitude
+                if distFromCenter <= FOVRadius then
+                    local toTarget = (head.Position - Camera.CFrame.Position).Unit
+                    local forward = Camera.CFrame.LookVector
+                    local dot = forward:Dot(toTarget)
+                    if dot > 0.5 then
+                        local distance3D = (head.Position - LocalPlayer.Character.Head.Position).Magnitude
+                        if distance3D < shortestDistance then
+                            shortestDistance = distance3D
+                            closest = player
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return closest
+end
+
+local function predictPosition(head, hrp)
+    if not head then return nil end
+    return head.Position + Vector3.new(0, 0.15, 0)
+end
+
+local HeadLockCircle = Drawing.new("Circle")
+HeadLockCircle.Color = Color3.fromRGB(0, 255, 0)
+HeadLockCircle.Thickness = 2
+HeadLockCircle.NumSides = 64
+HeadLockCircle.Filled = false
+HeadLockCircle.Transparency = 1
+HeadLockCircle.Visible = false
+
+RunService.RenderStepped:Connect(function()
+    SilentFOVCircle.Visible = SilentAimEnabled
+    SilentFOVCircle.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+    SilentFOVCircle.Radius = FOVRadius
+    CurrentTarget = SilentAimEnabled and getClosestTarget() or nil
+
+    if CurrentTarget and CurrentTarget.Character and CurrentTarget.Character:FindFirstChild("Head") then
+        local targetHead = CurrentTarget.Character.Head
+        local myHead = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Head")
+        local humanoid = CurrentTarget.Character:FindFirstChild("Humanoid")
+
+        if myHead then
+            local myScreenPos, myOnScreen = Camera:WorldToViewportPoint(myHead.Position)
+            local targetScreenPos, targetOnScreen = Camera:WorldToViewportPoint(targetHead.Position)
+            if myOnScreen and targetOnScreen then
+                Tracer.Visible = true
+                Tracer.From = Vector2.new(myScreenPos.X, myScreenPos.Y)
+                Tracer.To = Vector2.new(targetScreenPos.X, targetScreenPos.Y)
+                if humanoid then
+                    local perc = humanoid.Health / humanoid.MaxHealth
+                    Tracer.Color = Color3.fromHSV(perc * 0.333, 1, 1)
+                end
+            else
+                Tracer.Visible = false
+            end
+        end
+
+        local screenPos, onScreen, depth = Camera:WorldToViewportPoint(targetHead.Position)
+        if onScreen and depth > 0 then
+            local rightWorld = targetHead.Position + (Camera.CFrame.RightVector * 0.25)
+            local screenRight = Camera:WorldToViewportPoint(rightWorld)
+            local radius = math.abs(screenRight.X - screenPos.X)
+            if radius < 8 then radius = 8 end
+            HeadLockCircle.Visible = true
+            HeadLockCircle.Position = Vector2.new(screenPos.X, screenPos.Y)
+            HeadLockCircle.Radius = radius
+            HeadLockCircle.Color = Color3.fromRGB(0, 255, 0)
+        else
+            HeadLockCircle.Visible = false
+        end
+    else
+        Tracer.Visible = false
+        HeadLockCircle.Visible = false
+    end
+end)
+
+local oldFire
+oldFire = hookfunction(Remote.FireServer, function(self, ...)
+    if self ~= Remote then return oldFire(self, ...) end
+    local args = {...}
+    if SilentAimEnabled and args[2] == "shoot_gun" and CurrentTarget then
+        local target = CurrentTarget.Character
+        if target then
+            local head = target:FindFirstChild("Head")
+            local hrp = target:FindFirstChild("HumanoidRootPart")
+            local humanoid = target:FindFirstChild("Humanoid")
+            if head and humanoid and hrp then
+                local aimPos = predictPosition(head, hrp)
+                if isBehindWall(LocalPlayer.Character.Head.Position, aimPos) then
+                    args[4] = CFrame.new(math.huge, math.huge, math.huge)
+                else
+                    args[4] = CFrame.new(LocalPlayer.Character.Head.Position, aimPos)
+                end
+                args[5] = {
+                    [1] = {
+                        [1] = {
+                            ["Instance"] = head,
+                            ["Normal"] = Vector3.new(0, 1, 0),
+                            ["Position"] = aimPos
+                        }
+                    }
+                }
+                local beam = Instance.new("Part")
+                beam.Anchored = true
+                beam.CanCollide = false
+                beam.Size = Vector3.new(0.12, 0.12, (aimPos - LocalPlayer.Character.Head.Position).Magnitude)
+                beam.CFrame = CFrame.new(LocalPlayer.Character.Head.Position, aimPos) * CFrame.new(0, 0, -beam.Size.Z / 2)
+                beam.Material = Enum.Material.Neon
+                beam.Transparency = 0.35
+                beam.Color = Color3.fromRGB(255, 255, 0)
+                beam.Parent = Workspace
+                Debris:AddItem(beam, 0.6)
+            end
+        end
+    end
+    return oldFire(self, unpack(args))
+end)
+
+        end
+    end
+    return oldFire(self, unpack(args))
+end)
+
+-- Silent Aim Tab
+local Tab = Window:Tab({Title = "Silent Aim", Icon = "crosshair"})
+Tab:Section({Title = "GUN:"})
+Tab:Toggle({
+    Title = "Silent Aim",
+    Default = false,
+    Callback = function(state)
+        SilentAimEnabled = state
+    end
+})
+Tab:Slider({
+    Title = "FOV: ",
+    Step = 1,
+    Value = {
+        Min = 20,
+        Max = 750,
+        Default = FOVRadius
+    },
+    Callback = function(value)
+        FOVRadius = tonumber(value) or 120
+        print("FOV", FOVRadius)
+    end
+})
+
+-- Combat Section
+Tab:Divider()
+Tab:Section({Title = "COMBAT:"})
+Tab:Toggle({
+    Title = "Aura Melee",
+    Default = false,
+    Callback = function(state)
+        hookEnabled = state
+        WindUI:Notify({
+            Title = state and "✅ Hook Enabled" or "❌ Hook Disabled",
+            Description = state and "✅ Hook Enabled" or "❌ Hook Disabled",
+            Duration = 3
+        })
+    end
+})
+
+-- Auto Attack Logic
+local CounterTable = (function()
+    for _, Obj in getgc(true) do
+        if typeof(Obj) == "table" and rawget(Obj, "event") and rawget(Obj, "func") then
+            return Obj
+        end
+    end
+    return { event = 0, func = 0 } -- Default initialization
+end)()
+
+local function CallRemote(remote, ...)
+    if not CounterTable then
+        warn("CounterTable not found")
+        return
+    end
+    local args = {...}
+    if remote.ClassName == "RemoteEvent" then
+        CounterTable.event = (CounterTable.event or 0) + 1
+        remote:FireServer(CounterTable.event, unpack(args))
+    elseif remote.ClassName == "RemoteFunction" then
+        CounterTable.func = (CounterTable.func or 0) + 1
+        return remote:InvokeServer(CounterTable.func, unpack(args))
+    end
+end
+
+local function getPlayersInRange(radius)
+    local inRange = {}
+    local char = LocalPlayer.Character
+    if not char or not char.PrimaryPart then return inRange end
+    local pos = char.PrimaryPart.Position
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character and player.Character.PrimaryPart then
+            if (player.Character.PrimaryPart.Position - pos).Magnitude <= radius then
+                table.insert(inRange, player)
+            end
+        end
+    end
+    return inRange
+end
+
+local function getActiveTool()
+    local char = LocalPlayer.Character
+    if char then
+        for _, item in pairs(char:GetChildren()) do
+            if item:IsA("Tool") then
+                return item
+            end
+        end
+    end
+    local backpack = LocalPlayer:FindFirstChild("Backpack")
+    if backpack then
+        for _, item in pairs(backpack:GetChildren()) do
+            if item:IsA("Tool") then
+                return item
+            end
+        end
+    end
+    return nil
+end
+
+local function AttackNearby()
+    local tool = getActiveTool()
+    if not tool then return end
+    local targets = getPlayersInRange(10)
+    for _, target in pairs(targets) do
+        if target.Character and target.Character.PrimaryPart then
+            local localPos = LocalPlayer.Character.PrimaryPart.Position
+            local enemyPos = target.Character.PrimaryPart.Position
+            local lookAtCFrame = CFrame.lookAt(localPos, enemyPos)
+            local args = {
+                "melee_attack",
+                tool,
+                {target},
+                lookAtCFrame,
+                0.75
+            }
+            CallRemote(Remote, unpack(args))
+        end
+    end
+end
+
+local function StartAutoAttack()
+    task.spawn(function()
+        while true do
+            if hookEnabled and LocalPlayer.Character and LocalPlayer.Character.PrimaryPart then
+                AttackNearby()
+            end
+            task.wait(1)
+        end
+    end)
+end
+StartAutoAttack()
+LocalPlayer.CharacterAdded:Connect(function()
+    task.wait(1)
+    StartAutoAttack()
+end)
+
+-- ESP Tab
+local Tab_ESP = Window:Tab({Title = "ESP", Icon = "eye"})
+Tab_ESP:Section({Title = "ESP:"})
+Tab_ESP:Toggle({
+    Title = "Box ESP",
+    Default = false,
+    Callback = function(state)
+        boxESPEnabled = state
+    end
+})
+Tab_ESP:Toggle({
+    Title = "Name ESP",
+    Default = false,
+    Callback = function(state)
+        nameESPEnabled = state
+    end
+})
+Tab_ESP:Toggle({
+    Title = "Health ESP",
+    Default = false,
+    Callback = function(state)
+        healthESPEnabled = state
+    end
+})
+Tab_ESP:Toggle({
+    Title = "Distance ESP",
+    Default = false,
+    Callback = function(state)
+        distanceESPEnabled = state
+    end
+})
+Tab_ESP:Toggle({
+    Title = "Highlight",
+    Default = false,
+    Callback = function(state)
+        highlightEnabled = state
+        if not state then
+            for _, hl in pairs(highlights) do
+                if hl then hl:Destroy() end
+            end
+            highlights = {}
+        else
+            updateHighlights()
+        end
+    end
+})
+
+local function createHighlight(character)
+    local highlight = Instance.new("Highlight")
+    highlight.FillColor = Color3.fromRGB(200, 0, 255)
+    highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+    highlight.FillTransparency = 0.3
+    highlight.OutlineTransparency = 0
+    highlight.Parent = character
+    return highlight
+end
+
+local function updateHighlights()
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character then
+            if not highlights[player] or not highlights[player].Parent then
+                highlights[player] = createHighlight(player.Character)
+            end
+        end
+    end
+    for player, hl in pairs(highlights) do
+        if not player or not player.Parent or not player.Character then
+            hl:Destroy()
+            highlights[player] = nil
+        end
+    end
+end
+
+task.spawn(function()
+    while task.wait(1) do
+        if highlightEnabled then
+            updateHighlights()
+        end
+    end
+end)
+
+for _, player in ipairs(Players:GetPlayers()) do
+    player.CharacterAdded:Connect(function(character)
+        if highlightEnabled then
+            highlights[player] = createHighlight(character)
+        end
+    end)
+end
+
+local function createESP(player)
+    if espPlayers[player] then return end
+    local lines = {}
+    for i = 1, 12 do
+        local line = Drawing.new("Line")
+        line.Color = Color3.new(1, 1, 1)
+        line.Thickness = 2
+        line.Visible = false
+        line.From = Vector2.new(0, 0)
+        line.To = Vector2.new(0, 0)
+        lines[i] = line
+    end
+    local nameText = Drawing.new("Text")
+    nameText.Size = 16
+    nameText.Center = true
+    nameText.Outline = true
+    nameText.Color = Color3.fromRGB(255, 255, 255)
+    nameText.Font = 2
+    local distanceText = Drawing.new("Text")
+    distanceText.Size = 14
+    distanceText.Center = true
+    distanceText.Outline = true
+    distanceText.Color = Color3.fromRGB(255, 255, 255)
+    local healthBg = Drawing.new("Square")
+    healthBg.Filled = false
+    healthBg.Thickness = 1
+    healthBg.Color = Color3.fromRGB(0, 0, 0)
+    healthBg.Transparency = 1
+    healthBg.Visible = false
+    local healthFg = Drawing.new("Square")
+    healthFg.Filled = true
+    healthFg.Transparency = 1
+    healthFg.Visible = false
+    local highlight = Instance.new("Highlight")
+    highlight.FillColor = Color3.fromRGB(255, 0, 255)
+    highlight.OutlineColor = Color3.fromRGB(255, 0, 255)
+    highlight.FillTransparency = 1
+    highlight.OutlineTransparency = 0
+    highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    highlight.Enabled = false
+    local drawings = {nameText, distanceText, healthBg, healthFg, highlight}
+    for _, line in ipairs(lines) do
+        table.insert(drawings, line)
+    end
+    local conn = RunService.RenderStepped:Connect(function()
+        if not player or not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then
+            for _, line in ipairs(lines) do line.Visible = false end
+            nameText.Visible = false
+            distanceText.Visible = false
+            healthBg.Visible = false
+            healthFg.Visible = false
+            highlight.Enabled = false
+            return
+        end
+        highlight.Adornee = player.Character
+        local hrp = player.Character.HumanoidRootPart
+        local humanoid = player.Character:FindFirstChild("Humanoid")
+        local dist = 0
+        if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+            dist = (hrp.Position - LocalPlayer.Character.HumanoidRootPart.Position).Magnitude
+        end
+        local thickness = dist > 0 and math.clamp(500 / math.max(dist, 1), 0.5, 2) or 2
+        local cf = player.Character:GetPivot()
+        local size = Vector3.new(3.5, 7, 2)
+        local halfSize = size / 2
+        local corners = {
+            cf * Vector3.new(-halfSize.X, -halfSize.Y, -halfSize.Z),
+            cf * Vector3.new(-halfSize.X, -halfSize.Y, halfSize.Z),
+            cf * Vector3.new(-halfSize.X, halfSize.Y, -halfSize.Z),
+            cf * Vector3.new(-halfSize.X, halfSize.Y, halfSize.Z),
+            cf * Vector3.new(halfSize.X, -halfSize.Y, -halfSize.Z),
+            cf * Vector3.new(halfSize.X, -halfSize.Y, halfSize.Z),
+            cf * Vector3.new(halfSize.X, halfSize.Y, -halfSize.Z),
+            cf * Vector3.new(halfSize.X, halfSize.Y, halfSize.Z)
+        }
+        local vp = {}
+        local minX, maxX, minY, maxY = math.huge, -math.huge, math.huge, -math.huge
+        local hasFront = false
+        for i, world in ipairs(corners) do
+            local screenPos, onScreen = Camera:WorldToViewportPoint(world)
+            vp[i] = {pos = screenPos, on = onScreen}
+            if onScreen and screenPos.Z > 0 then
+                hasFront = true
+                minX = math.min(minX, screenPos.X)
+                maxX = math.max(maxX, screenPos.X)
+                minY = math.min(minY, screenPos.Y)
+                maxY = math.max(maxY, screenPos.Y)
+            end
+        end
+        if not hasFront then
+            for _, line in ipairs(lines) do line.Visible = false end
+            nameText.Visible = false
+            distanceText.Visible = false
+            healthBg.Visible = false
+            healthFg.Visible = false
+            highlight.Enabled = false
+            return
+        end
+        local width = maxX - minX
+        local height = maxY - minY
+        local centerX = (minX + maxX) / 2
+        local boxColor = Color3.new(1, 1, 1)
+        if humanoid and humanoid.Health > 0 then
+            local perc = humanoid.Health / humanoid.MaxHealth
+            boxColor = Color3.fromHSV(perc * 0.333, 0.5, 1)
+        end
+        if boxESPEnabled then
+            local edges = {
+                {1, 2}, {1, 3}, {1, 5},
+                {2, 4}, {2, 6},
+                {3, 4}, {3, 7},
+                {4, 8},
+                {5, 6}, {5, 7},
+                {6, 8},
+                {7, 8}
+            }
+            for i, edge in ipairs(edges) do
+                local aIdx, bIdx = edge[1], edge[2]
+                local a, b = vp[aIdx], vp[bIdx]
+                if a and b and a.on and b.on and a.pos and b.pos then
+                    local ax, ay = a.pos.X, a.pos.Y
+                    local bx, by = b.pos.X, b.pos.Y
+                    if ax == ax and ay == ay and bx == bx and by == by then
+                        lines[i].From = Vector2.new(ax, ay)
+                        lines[i].To = Vector2.new(bx, by)
+                        lines[i].Color = boxColor
+                        lines[i].Thickness = thickness
+                        lines[i].Visible = true
+                    else
+                        lines[i].Visible = false
+                    end
+                else
+                    lines[i].Visible = false
+                end
+            end
+        else
+            for _, line in ipairs(lines) do line.Visible = false end
+        end
+        local currentTopY = minY
+        if healthESPEnabled and humanoid and humanoid.Health > 0 then
+            local perc = humanoid.Health / humanoid.MaxHealth
+            local barHeight = 4
+            local minBarWidth = 50
+            local barWidth = math.max(width, minBarWidth)
+            local healthX = width < minBarWidth and centerX - minBarWidth / 2 or minX
+            healthBg.Position = Vector2.new(healthX, currentTopY - barHeight - 2)
+            healthBg.Size = Vector2.new(barWidth, barHeight)
+            healthBg.Visible = true
+            healthFg.Position = Vector2.new(healthX, currentTopY - barHeight - 2)
+            healthFg.Size = Vector2.new(barWidth * perc, barHeight)
+            healthFg.Color = Color3.fromHSV(perc * 0.333, 0.5, 1)
+            healthFg.Visible = true
+            currentTopY = currentTopY - barHeight - 2
+        else
+            healthBg.Visible = false
+            healthFg.Visible = false
+        end
+        nameText.Text = nameESPEnabled and player.Name or ""
+        nameText.Position = Vector2.new(centerX, currentTopY - 16)
+        nameText.Visible = nameESPEnabled
+        distanceText.Text = distanceESPEnabled and string.format("%.0f studs", dist) or ""
+        distanceText.Position = Vector2.new(centerX, maxY + 4)
+        distanceText.Visible = distanceESPEnabled
+        highlight.Enabled = highlightEnabled
+    end)
+    espPlayers[player] = {conn = conn, drawings = drawings}
+end
+
+local function loadESP()
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and not espPlayers[player] then
+            createESP(player)
+        end
+    end
+    Players.PlayerAdded:Connect(function(player)
+        if player ~= LocalPlayer then
+            player.CharacterAdded:Connect(function()
+                task.wait(0.1)
+                if not espPlayers[player] then
+                    createESP(player)
+                end
+            end)
+            if player.Character and not espPlayers[player] then
+                task.wait(0.1)
+                createESP(player)
+            end
+        end
+    end)
+end
+Players.PlayerRemoving:Connect(function(player)
+    if espPlayers[player] then
+        for _, obj in pairs(espPlayers[player].drawings) do
+            if obj.Destroy then
+                obj:Destroy()
+            elseif typeof(obj) == "table" and obj.Visible ~= nil then
+                obj.Visible = false
+            end
+        end
+        if espPlayers[player].conn then
+            espPlayers[player].conn:Disconnect()
+        end
+        espPlayers[player] = nil
+    end
+end)
+loadESP()
+
+-- Character Tab
+local Tab_Character = Window:Tab({Title = "Character", Icon = "user"})
+Tab_Character:Section({Title = "CHARACTER:"})
+local moveConnection
+local function setupCharacter(char)
+    Character = char
+    Humanoid = char:WaitForChild("Humanoid")
+    HumanoidRootPart = char:WaitForChild("HumanoidRootPart")
+    if moveConnection then
+        moveConnection:Disconnect()
+    end
+    moveConnection = RunService.RenderStepped:Connect(function()
+        if walkSpeedEnabled and Humanoid and HumanoidRootPart then
+            if Humanoid.MoveDirection.Magnitude > 0 then
+                HumanoidRootPart.CFrame = HumanoidRootPart.CFrame + (Humanoid.MoveDirection.Unit * speedValue)
+            end
+        end
+    end)
+    Humanoid.Died:Connect(function()
+        flying = false
+    end)
+end
+LocalPlayer.CharacterAdded:Connect(setupCharacter)
+setupCharacter(Character)
+
+UserInputService.InputBegan:Connect(function(input, processed)
+    if processed then return end
+    if FlyEnabled and input.KeyCode == Enum.KeyCode.Space then
+        flying = true
+    end
+end)
+UserInputService.InputEnded:Connect(function(input)
+    if FlyEnabled and input.KeyCode == Enum.KeyCode.Space then
+        flying = false
+    end
+end)
+UserInputService.JumpRequest:Connect(function()
+    if FlyEnabled then
+        flying = true
+    end
+end)
+Humanoid.StateChanged:Connect(function(_, newState)
+    if FlyEnabled and (newState == Enum.HumanoidStateType.Landed or newState == Enum.HumanoidStateType.Running) then
+        flying = false
+    end
+end)
+RunService.RenderStepped:Connect(function()
+    if FlyEnabled and flying and HumanoidRootPart then
+        local v = HumanoidRootPart.Velocity
+        HumanoidRootPart.Velocity = Vector3.new(v.X, floatPower, v.Z)
+    end
+end)
+
+Tab_Character:Toggle({
+    Title = "Walk Speed",
+    Default = false,
+    Callback = function(state)
+        walkSpeedEnabled = state
+    end
+})
+Tab_Character:Slider({
+    Title = "Speed Multiplier",
+    Step = 0.5,
+    Value = {
+        Min = 1,
+        Max = 3,
+        Default = 2
+    },
+    Callback = function(value)
+        speedValue = value * 0.07
+    end
+})
+Tab_Character:Toggle({
+    Title = "Jump Power",
+    Default = false,
+    Callback = function(state)
+        FlyEnabled = state
+        if not FlyEnabled then
+            flying = false
+        end
+    end
+})
+
+local function setFinishPrompt(prompt)
+    if prompt and prompt:IsA("ProximityPrompt") then
+        prompt.HoldDuration = 0.85
+        prompt.MaxActivationDistance = 100
+    end
+end
+
+local function applyToAll()
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer and p.Character then
+            local hrp = p.Character:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                local prompt = hrp:FindFirstChild("FinishPrompt")
+                if prompt then
+                    setFinishPrompt(prompt)
+                end
+            end
+        end
+    end
+end
+
+local function setupFastFinishForPlayer(p)
+    if p ~= LocalPlayer then
+        p.CharacterAdded:Connect(function(char)
+            local descConn
+            descConn = char.DescendantAdded:Connect(function(desc)
+                if fastFinishEnabled and desc.Name == "FinishPrompt" and desc:IsA("ProximityPrompt") and desc.Parent and desc.Parent.Name == "HumanoidRootPart" then
+                    setFinishPrompt(desc)
+                end
+            end)
+            local hrp = char:WaitForChild("HumanoidRootPart", 5)
+            if hrp and fastFinishEnabled then
+                local prompt = hrp:FindFirstChild("FinishPrompt")
+                if prompt then
+                    setFinishPrompt(prompt)
+                end
+            end
+        end)
+        if p.Character then
+            local char = p.Character
+            local descConn
+            descConn = char.DescendantAdded:Connect(function(desc)
+                if fastFinishEnabled and desc.Name == "FinishPrompt" and desc:IsA("ProximityPrompt") and desc.Parent and desc.Parent.Name == "HumanoidRootPart" then
+                    setFinishPrompt(desc)
+                end
+            end)
+            local hrp = char:FindFirstChild("HumanoidRootPart")
+            if hrp and fastFinishEnabled then
+                local prompt = hrp:FindFirstChild("FinishPrompt")
+                if prompt then
+                    setFinishPrompt(prompt)
+                end
+            end
+        end
+    end
+end
+
+for _, p in ipairs(Players:GetPlayers()) do
+    setupFastFinishForPlayer(p)
+end
+Players.PlayerAdded:Connect(setupFastFinishForPlayer)
+
+Tab_Character:Toggle({
+    Title = "Infinite Stamina",
+    Default = false,
+    Callback = function()
+        local SprintModule = require(ReplicatedStorage.Modules.Game.Sprint)
+        local consume_stamina = SprintModule.consume_stamina
+        local SprintBar = debug.getupvalue(consume_stamina, 2).sprint_bar
+        local function c()
+            return getgenv()
+        end
+        c().Infinitestamina = not c().Infinitestamina
+        if not c().SprintHooked then
+            local Old
+            Old = hookfunction(SprintBar.update, function(...)
+                if c().Infinitestamina then
+                    return Old(function() return 1 end)
+                else
+                    return Old(...)
+                end
+            end)
+            c().SprintHooked = true
+        end
+        print("Infinite Stamina is now: " .. tostring(c().Infinitestamina))
+    end
+})
+
+Tab_Character:Toggle({
+    Title = "Fast Finish",
+    Default = false,
+    Callback = function(state)
+        fastFinishEnabled = state
+        if state then
+            applyToAll()
+            WindUI:Notify({Title = "✅ Fast Finish Enabled", Description = "✅ Fast Finish Enabled", Duration = 3})
+        else
+            WindUI:Notify({Title = "❌ Fast Finish Disabled", Description = "❌ Fast Finish Disabled", Duration = 3})
+        end
+    end
+})
+
+Tab_Character:Divider()
+Tab_Character:Section({Title = "FOR MOBILE PC HOLD (Z)"})
+local connection
+local function lockYPosition()
+    if connection then
+        connection:Disconnect()
+    end
+    connection = RunService.Heartbeat:Connect(function()
+        if teleportActive and lockedY and HumanoidRootPart then
+            local currentPos = HumanoidRootPart.Position
+            if math.abs(currentPos.Y - lockedY) > 0.1 then
+                HumanoidRootPart.CFrame = CFrame.new(currentPos.X, lockedY, currentPos.Z)
+            end
+        end
+    end)
+end
+
+local function createNeonEffectAtPosition(pos, fadeTime)
+    for _, part in ipairs(Character:GetDescendants()) do
+        if part:IsA("BasePart") then
+            local box = Instance.new("Part")
+            box.Size = part.Size + Vector3.new(0.05, 0.05, 0.05)
+            box.CFrame = part.CFrame + Vector3.new(0, pos.Y - HumanoidRootPart.Position.Y, 0)
+            box.Anchored = true
+            box.CanCollide = false
+            box.Material = Enum.Material.Neon
+            box.Color = Color3.fromRGB(128, 0, 255)
+            box.Transparency = 0.3
+            box.Parent = Workspace
+            local tweenInfo = TweenInfo.new(fadeTime, Enum.EasingStyle.Linear)
+            TweenService:Create(box, tweenInfo, {Transparency = 1}):Play()
+            Debris:AddItem(box, fadeTime)
+        end
+    end
+end
+
+local function performTeleport()
+    if not HumanoidRootPart then return end
+    local currentPos = HumanoidRootPart.Position
+    local bottomPos = Vector3.new(currentPos.X, currentPos.Y - maxHeight, currentPos.Z)
+    HumanoidRootPart.CFrame = CFrame.new(bottomPos)
+    lockedY = bottomPos.Y
+    local sound = Instance.new("Sound")
+    sound.SoundId = "rbxassetid://95298029662868"
+    sound.Volume = 1
+    sound.PlayOnRemove = true
+    sound.Parent = HumanoidRootPart
+    sound:Destroy()
+    createNeonEffectAtPosition(currentPos, 1.5)
+    createNeonEffectAtPosition(bottomPos, 2)
+end
+
+local function toggleTeleport()
+    if not featureEnabled then return end
+    teleportActive = not teleportActive
+    if teleportActive then
+        performTeleport()
+    else
+        lockedY = nil
+    end
+end
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.KeyCode == Enum.KeyCode.Z and featureEnabled then
+        toggleTeleport()
+    end
+end)
+
+LocalPlayer.CharacterAdded:Connect(function(newChar)
+    Character = newChar
+    HumanoidRootPart = newChar:WaitForChild("HumanoidRootPart")
+    lockedY = nil
+    teleportActive = false
+    lockYPosition()
+end)
+lockYPosition()
+
+Tab_Character:Toggle({
+    Title = "Snap Under Map",
+    Default = false,
+    Callback = function(state)
+        featureEnabled = state
+        if featureEnabled then
+            startY = HumanoidRootPart and HumanoidRootPart.Position.Y or nil
+            teleportActive = true
+            performTeleport()
+        else
+            teleportActive = false
+            lockedY = nil
+            startY = nil
+        end
+    end
+})
+
+Tab_Character:Slider({
+    Title = "Snap:",
+    Step = 1,
+    Value = { Min = 1, Max = 50, Default = 10 },
+    Callback = function(value)
+        maxHeight = value
+        if teleportActive and HumanoidRootPart and startY then
+            local bottomPos = Vector3.new(HumanoidRootPart.Position.X, startY - maxHeight, HumanoidRootPart.Position.Z)
+            HumanoidRootPart.CFrame = CFrame.new(bottomPos)
+            lockedY = bottomPos.Y
+        end
+    end
+})
+
+-- Tool Editor Tab
+local Tab_Tools = Window:Tab({Title = "Mods Editor", Icon = "wrench"})
+local selectedTools = {}
+local dropdownValues = {}
+
+local function getAllTools()
+    local tools = {}
+    for _, container in ipairs({LocalPlayer.Backpack, LocalPlayer.Character}) do
+        if container then
+            for _, tool in ipairs(container:GetChildren()) do
+                if tool:IsA("Tool") and not table.find(tools, tool.Name) then
+                    table.insert(tools, tool.Name)
+                end
+            end
+        end
+    end
+    return tools
+end
+
+local function editToolAttributes(tool)
+    local attrs = tool:GetAttributes()
+    for attrName, attrValue in pairs(attrs) do
+        if typeof(attrValue) == "number" and attrName ~= "MagSize" and attrName ~= "Recoil" then
+            tool:SetAttribute(attrName, 1500)
+            break
+        end
+    end
+    if tool:GetAttribute("Recoil") ~= nil then
+        tool:SetAttribute("Recoil", 0)
+    end
+end
+
+local function clearSelection(dropdown)
+    if #selectedTools == 0 then return end
+    for i = #dropdownValues, 1, -1 do
+        if table.find(selectedTools, dropdownValues[i]) then
+            table.remove(dropdownValues, i)
+        end
+    end
+    selectedTools = {}
+    pcall(function()
+        if dropdown.SetValues then
+            dropdown:SetValues(dropdownValues)
+        elseif dropdown.Update then
+            dropdown:Update(dropdownValues)
+        elseif dropdown.Refresh then
+            dropdown:Refresh(dropdownValues)
+        end
+        if dropdown.SetValue then
+            dropdown:SetValue({})
+        elseif dropdown.Set then
+            dropdown:Set({})
+        end
+    end)
+    WindUI:Notify({
+        Title = "Cleared",
+        Description = "Removed selected tools.",
+        Duration = 2
+    })
+end
+
+local function refreshToolsList(dropdown)
+    dropdownValues = getAllTools()
+    pcall(function()
+        if dropdown.SetValues then
+            dropdown:SetValues(dropdownValues)
+        elseif dropdown.Update then
+            dropdown:Update(dropdownValues)
+        elseif dropdown.Refresh then
+            dropdown:Refresh(dropdownValues)
+        end
+        clearSelection(dropdown)
+    end)
+    WindUI:Notify({
+        Title = "Refreshed",
+        Description = "Found " .. #dropdownValues .. " tools",
+        Duration = 2
+    })
+end
+
+Tab_Tools:Section({Title = "MOOD GUN:"})
+local dropdown = Tab_Tools:Dropdown({
+    Title = "Select Tools",
+    Values = getAllTools(),
+    Value = {},
+    Multi = true,
+    AllowNone = true,
+    Callback = function(tools)
+        selectedTools = tools
+    end
+})
+
+Tab_Tools:Button({
+    Title = "🔄 Refresh Tools",
+    Callback = function()
+        refreshToolsList(dropdown)
+    end
+})
+
+Tab_Tools:Button({
+    Title = "❌ Clear Selection",
+    Callback = function()
+        clearSelection(dropdown)
+    end
+})
+
+task.spawn(function()
+    while true do
+        task.wait(1)
+        if #selectedTools > 0 then
+            for _, container in ipairs({LocalPlayer.Backpack, LocalPlayer.Character}) do
+                if container then
+                    for _, tool in ipairs(container:GetChildren()) do
+                        if tool:IsA("Tool") and table.find(selectedTools, tool.Name) then
+                            editToolAttributes(tool)
+                        end
+                    end
+                end
+            end
+        end
+    end
+end)
+
+-- Buy Ammo Tab
+local Tab_buy = Window:Tab({Title = "Buy Ammo", Icon = "dollar-sign"})
+Tab_buy:Button({
+    Title = "Pistol Ammo",
+    Callback = function()
+        WindUI:Notify({
+            Title = "✅ Opening Ammo Crate",
+            Description = "กำลังเปิดกล่องกระสุนปืนพก...",
+            Duration = 3
+        })
+        if not CounterTable then
+            warn("❌ CounterTable not found")
+            WindUI:Notify({
+                Title = "❌ Failed",
+                Description = "ไม่พบ CounterTable",
+                Duration = 3
+            })
+            return
+        end
+        local remote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("Get")
+        local crate = Workspace.Map.Tiles.GunShopTile.PatriotWeapons.Interior.Crates["Ammo Crate"].CrateOptions.Pistol
+        CallRemote(remote, "open_crate", crate, "money")
+        WindUI:Notify({
+            Title = "🎯 Success",
+            Description = "เปิดกล่องกระสุนเรียบร้อยแล้ว!",
+            Duration = 3
+        })
+    end
+})
+
+-- Enable Fists
+Tab:Toggle({
+    Title = "Enable Fists",
+    Default = false,
+    Callback = function(state)
+        if state then
+            local backpack = LocalPlayer:WaitForChild("Backpack")
+            local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+            local function fixAttributes(fists)
+                if fists and fists:IsA("Tool") then
+                    if fists:GetAttribute("Disabled") ~= nil then
+                        fists:SetAttribute("Disabled", false)
+                    end
+                    if fists:GetAttribute("DisableInVehicle") ~= nil then
+                        fists:SetAttribute("DisableInVehicle", false)
+                    end
+                end
+            end
+            for _, v in ipairs(backpack:GetChildren()) do
+                if v.Name == "Fists" then
+                    fixAttributes(v)
+                end
+            end
+            for _, v in ipairs(character:GetChildren()) do
+                if v.Name == "Fists" then
+                    fixAttributes(v)
+                end
+            end
+            LocalPlayer.CharacterAdded:Connect(function(char)
+                task.wait(1)
+                for _, v in ipairs(char:GetChildren()) do
+                    if v.Name == "Fists" then
+                        fixAttributes(v)
+                    end
+                end
+            end)
+            WindUI:Notify({
+                Title = "✅ Attributes Updated",
+                Description = "Fists Attributes ถูกตั้งค่าแล้ว",
+                Duration = 3
+            })
+        end
+    end
+})
